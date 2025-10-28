@@ -1,23 +1,41 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import Icon from '@/components/ui/icon';
 import { useToast } from '@/hooks/use-toast';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
+import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, Table as DocxTable, TableRow as DocxTableRow, TableCell as DocxTableCell, WidthType, BorderStyle } from 'docx';
+import { saveAs } from 'file-saver';
 
 interface Conclusion {
   id: string;
   number: string;
   date: string;
   objectName: string;
+  customerId?: string;
+  customerName?: string;
   weldNumber: string;
+  welderId?: string;
+  welderName?: string;
+  pipeDiameterId?: string;
+  pipeDiameter?: string;
   controlMethod: string;
+  equipment?: string;
+  normativeDoc?: string;
+  executor?: string;
+  certificate?: string;
+  temperature?: string;
+  defectDescription?: string;
+  conclusion?: string;
   result: 'допущено' | 'не допущено';
   status: 'draft' | 'completed';
 }
@@ -29,64 +47,56 @@ interface Template {
   fields: Record<string, string>;
 }
 
+interface Customer {
+  id: string;
+  name: string;
+  inn?: string;
+  address?: string;
+  contactPerson?: string;
+  phone?: string;
+  email?: string;
+}
+
+interface Welder {
+  id: string;
+  fullName: string;
+  certificateNumber: string;
+  certificateDate?: string;
+  qualification?: string;
+  organization?: string;
+}
+
+interface PipeDiameter {
+  id: string;
+  diameter: string;
+  wallThickness?: string;
+  material?: string;
+  gostStandard?: string;
+}
+
 const Index = () => {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('list');
-  const [conclusions, setConclusions] = useState<Conclusion[]>([
-    {
-      id: '1',
-      number: 'НК-2024-001',
-      date: '2024-01-15',
-      objectName: 'МГ "Сила Сибири"',
-      weldNumber: 'СС-123',
-      controlMethod: 'Ультразвуковой контроль',
-      result: 'допущено',
-      status: 'completed'
-    },
-    {
-      id: '2',
-      number: 'НК-2024-002',
-      date: '2024-01-16',
-      objectName: 'МГ "Северный поток"',
-      weldNumber: 'СП-456',
-      controlMethod: 'Радиографический контроль',
-      result: 'не допущено',
-      status: 'completed'
-    }
-  ]);
-
-  const [templates, setTemplates] = useState<Template[]>([
-    {
-      id: '1',
-      name: 'УЗК магистральных трубопроводов',
-      controlMethod: 'Ультразвуковой контроль',
-      fields: {
-        controlMethod: 'Ультразвуковой контроль',
-        equipment: 'УД2-12',
-        normativeDoc: 'СТО Газпром 15-1.3-004-2023'
-      }
-    },
-    {
-      id: '2',
-      name: 'РК промысловых трубопроводов',
-      controlMethod: 'Радиографический контроль',
-      fields: {
-        controlMethod: 'Радиографический контроль',
-        equipment: 'РАП-150/300',
-        normativeDoc: 'СТО Газпром 15-1.3-004-2023'
-      }
-    }
-  ]);
-
+  const [conclusions, setConclusions] = useState<Conclusion[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [welders, setWelders] = useState<Welder[]>([]);
+  const [pipeDiameters, setPipeDiameters] = useState<PipeDiameter[]>([]);
+  
   const [searchTerm, setSearchTerm] = useState('');
   const [filterMethod, setFilterMethod] = useState<string>('all');
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
+  const [editingConclusion, setEditingConclusion] = useState<Conclusion | null>(null);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
 
   const [formData, setFormData] = useState({
     number: '',
     date: new Date().toISOString().split('T')[0],
     objectName: '',
+    customerId: '',
     weldNumber: '',
+    welderId: '',
+    pipeDiameterId: '',
     controlMethod: '',
     equipment: '',
     normativeDoc: 'СТО Газпром 15-1.3-004-2023',
@@ -97,6 +107,35 @@ const Index = () => {
     conclusion: '',
     result: 'допущено' as 'допущено' | 'не допущено'
   });
+
+  const [newCustomer, setNewCustomer] = useState({ name: '', inn: '', address: '', contactPerson: '', phone: '', email: '' });
+  const [newWelder, setNewWelder] = useState({ fullName: '', certificateNumber: '', certificateDate: '', qualification: '', organization: '' });
+  const [newPipeDiameter, setNewPipeDiameter] = useState({ diameter: '', wallThickness: '', material: '', gostStandard: '' });
+  const [showAddCustomer, setShowAddCustomer] = useState(false);
+  const [showAddWelder, setShowAddWelder] = useState(false);
+  const [showAddPipeDiameter, setShowAddPipeDiameter] = useState(false);
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    try {
+      const [customersRes, weldersRes, pipesRes, templatesRes] = await Promise.all([
+        fetch('/api/customers').catch(() => ({ ok: false })),
+        fetch('/api/welders').catch(() => ({ ok: false })),
+        fetch('/api/pipe-diameters').catch(() => ({ ok: false })),
+        fetch('/api/templates').catch(() => ({ ok: false }))
+      ]);
+
+      if (customersRes.ok) setCustomers(await customersRes.json());
+      if (weldersRes.ok) setWelders(await weldersRes.json());
+      if (pipesRes.ok) setPipeDiameters(await pipesRes.json());
+      if (templatesRes.ok) setTemplates(await templatesRes.json());
+    } catch (error) {
+      console.log('Загрузка данных из базы не удалась, используем локальные данные');
+    }
+  };
 
   const handleTemplateSelect = (templateId: string) => {
     const template = templates.find(t => t.id === templateId);
@@ -119,6 +158,7 @@ const Index = () => {
       setFormData(prev => ({
         ...prev,
         objectName: lastConclusion.objectName,
+        customerId: lastConclusion.customerId || '',
         controlMethod: lastConclusion.controlMethod
       }));
       toast({
@@ -129,24 +169,56 @@ const Index = () => {
   };
 
   const handleSaveConclusion = () => {
+    const customer = customers.find(c => c.id === formData.customerId);
+    const welder = welders.find(w => w.id === formData.welderId);
+    const pipe = pipeDiameters.find(p => p.id === formData.pipeDiameterId);
+
     const newConclusion: Conclusion = {
-      id: Date.now().toString(),
+      id: editingConclusion?.id || Date.now().toString(),
       number: formData.number,
       date: formData.date,
       objectName: formData.objectName,
+      customerId: formData.customerId,
+      customerName: customer?.name,
       weldNumber: formData.weldNumber,
+      welderId: formData.welderId,
+      welderName: welder?.fullName,
+      pipeDiameterId: formData.pipeDiameterId,
+      pipeDiameter: pipe?.diameter,
       controlMethod: formData.controlMethod,
+      equipment: formData.equipment,
+      normativeDoc: formData.normativeDoc,
+      executor: formData.executor,
+      certificate: formData.certificate,
+      temperature: formData.temperature,
+      defectDescription: formData.defectDescription,
+      conclusion: formData.conclusion,
       result: formData.result,
       status: 'completed'
     };
 
-    setConclusions([newConclusion, ...conclusions]);
+    if (editingConclusion) {
+      setConclusions(conclusions.map(c => c.id === editingConclusion.id ? newConclusion : c));
+      toast({ title: 'Заключение обновлено' });
+      setIsEditDialogOpen(false);
+    } else {
+      setConclusions([newConclusion, ...conclusions]);
+      toast({ title: 'Заключение сохранено', description: `Заключение ${newConclusion.number} создано` });
+      setActiveTab('list');
+    }
     
+    resetForm();
+  };
+
+  const resetForm = () => {
     setFormData({
       number: '',
       date: new Date().toISOString().split('T')[0],
       objectName: '',
+      customerId: '',
       weldNumber: '',
+      welderId: '',
+      pipeDiameterId: '',
       controlMethod: '',
       equipment: '',
       normativeDoc: 'СТО Газпром 15-1.3-004-2023',
@@ -157,13 +229,30 @@ const Index = () => {
       conclusion: '',
       result: 'допущено'
     });
+    setEditingConclusion(null);
+  };
 
-    toast({
-      title: 'Заключение сохранено',
-      description: `Заключение ${newConclusion.number} успешно создано`
+  const handleEditConclusion = (conclusion: Conclusion) => {
+    setFormData({
+      number: conclusion.number,
+      date: conclusion.date,
+      objectName: conclusion.objectName,
+      customerId: conclusion.customerId || '',
+      weldNumber: conclusion.weldNumber,
+      welderId: conclusion.welderId || '',
+      pipeDiameterId: conclusion.pipeDiameterId || '',
+      controlMethod: conclusion.controlMethod,
+      equipment: conclusion.equipment || '',
+      normativeDoc: conclusion.normativeDoc || 'СТО Газпром 15-1.3-004-2023',
+      executor: conclusion.executor || '',
+      certificate: conclusion.certificate || '',
+      temperature: conclusion.temperature || '',
+      defectDescription: conclusion.defectDescription || '',
+      conclusion: conclusion.conclusion || '',
+      result: conclusion.result
     });
-
-    setActiveTab('list');
+    setEditingConclusion(conclusion);
+    setIsEditDialogOpen(true);
   };
 
   const filteredConclusions = conclusions.filter(c => {
@@ -174,12 +263,438 @@ const Index = () => {
     return matchesSearch && matchesMethod;
   });
 
-  const handleExportPDF = (conclusion: Conclusion) => {
+  const exportToPDF = (conclusion: Conclusion) => {
+    const doc = new jsPDF();
+    
+    doc.addFont('https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf', 'Roboto', 'normal');
+    
+    doc.setFontSize(16);
+    doc.text('ЗАКЛЮЧЕНИЕ', 105, 20, { align: 'center' });
+    doc.text('по результатам неразрушающего контроля', 105, 28, { align: 'center' });
+    
+    doc.setFontSize(10);
+    doc.text(`Номер: ${conclusion.number}`, 20, 45);
+    doc.text(`Дата: ${new Date(conclusion.date).toLocaleDateString('ru-RU')}`, 20, 52);
+    doc.text(`Объект: ${conclusion.objectName}`, 20, 59);
+    
+    if (conclusion.customerName) {
+      doc.text(`Заказчик: ${conclusion.customerName}`, 20, 66);
+    }
+    
+    doc.text(`Номер сварного стыка: ${conclusion.weldNumber}`, 20, 73);
+    
+    if (conclusion.welderName) {
+      doc.text(`Сварщик: ${conclusion.welderName}`, 20, 80);
+    }
+    
+    if (conclusion.pipeDiameter) {
+      doc.text(`Диаметр трубы: ${conclusion.pipeDiameter}`, 20, 87);
+    }
+    
+    doc.text(`Метод контроля: ${conclusion.controlMethod}`, 20, 94);
+    
+    if (conclusion.equipment) {
+      doc.text(`Оборудование: ${conclusion.equipment}`, 20, 101);
+    }
+    
+    if (conclusion.normativeDoc) {
+      doc.text(`Нормативный документ: ${conclusion.normativeDoc}`, 20, 108);
+    }
+    
+    if (conclusion.executor) {
+      doc.text(`Исполнитель: ${conclusion.executor}`, 20, 115);
+    }
+    
+    if (conclusion.certificate) {
+      doc.text(`Номер аттестации: ${conclusion.certificate}`, 20, 122);
+    }
+    
+    if (conclusion.temperature) {
+      doc.text(`Температура: ${conclusion.temperature}°C`, 20, 129);
+    }
+    
+    let yPos = 140;
+    
+    if (conclusion.defectDescription) {
+      doc.text('Описание выявленных дефектов:', 20, yPos);
+      yPos += 7;
+      const splitDefects = doc.splitTextToSize(conclusion.defectDescription, 170);
+      doc.text(splitDefects, 20, yPos);
+      yPos += splitDefects.length * 5 + 5;
+    }
+    
+    if (conclusion.conclusion) {
+      doc.text('Заключение:', 20, yPos);
+      yPos += 7;
+      const splitConclusion = doc.splitTextToSize(conclusion.conclusion, 170);
+      doc.text(splitConclusion, 20, yPos);
+      yPos += splitConclusion.length * 5 + 5;
+    }
+    
+    doc.setFontSize(12);
+    doc.text(`Результат: ${conclusion.result.toUpperCase()}`, 20, yPos + 10);
+    
+    doc.save(`${conclusion.number}.pdf`);
+    
     toast({
-      title: 'Экспорт в PDF',
-      description: `Заключение ${conclusion.number} экспортировано`
+      title: 'PDF экспортирован',
+      description: `Заключение ${conclusion.number} сохранено`
     });
   };
+
+  const exportToWord = async (conclusion: Conclusion) => {
+    const doc = new Document({
+      sections: [{
+        properties: {},
+        children: [
+          new Paragraph({
+            text: 'ЗАКЛЮЧЕНИЕ',
+            heading: HeadingLevel.HEADING_1,
+            alignment: AlignmentType.CENTER,
+          }),
+          new Paragraph({
+            text: 'по результатам неразрушающего контроля',
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 400 }
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({ text: 'Номер: ', bold: true }),
+              new TextRun(conclusion.number)
+            ]
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({ text: 'Дата: ', bold: true }),
+              new TextRun(new Date(conclusion.date).toLocaleDateString('ru-RU'))
+            ]
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({ text: 'Объект: ', bold: true }),
+              new TextRun(conclusion.objectName)
+            ]
+          }),
+          ...(conclusion.customerName ? [new Paragraph({
+            children: [
+              new TextRun({ text: 'Заказчик: ', bold: true }),
+              new TextRun(conclusion.customerName)
+            ]
+          })] : []),
+          new Paragraph({
+            children: [
+              new TextRun({ text: 'Номер сварного стыка: ', bold: true }),
+              new TextRun(conclusion.weldNumber)
+            ]
+          }),
+          ...(conclusion.welderName ? [new Paragraph({
+            children: [
+              new TextRun({ text: 'Сварщик: ', bold: true }),
+              new TextRun(conclusion.welderName)
+            ]
+          })] : []),
+          ...(conclusion.pipeDiameter ? [new Paragraph({
+            children: [
+              new TextRun({ text: 'Диаметр трубы: ', bold: true }),
+              new TextRun(conclusion.pipeDiameter)
+            ]
+          })] : []),
+          new Paragraph({
+            children: [
+              new TextRun({ text: 'Метод контроля: ', bold: true }),
+              new TextRun(conclusion.controlMethod)
+            ]
+          }),
+          ...(conclusion.equipment ? [new Paragraph({
+            children: [
+              new TextRun({ text: 'Оборудование: ', bold: true }),
+              new TextRun(conclusion.equipment)
+            ]
+          })] : []),
+          ...(conclusion.normativeDoc ? [new Paragraph({
+            children: [
+              new TextRun({ text: 'Нормативный документ: ', bold: true }),
+              new TextRun(conclusion.normativeDoc)
+            ]
+          })] : []),
+          ...(conclusion.executor ? [new Paragraph({
+            children: [
+              new TextRun({ text: 'Исполнитель: ', bold: true }),
+              new TextRun(conclusion.executor)
+            ]
+          })] : []),
+          ...(conclusion.certificate ? [new Paragraph({
+            children: [
+              new TextRun({ text: 'Номер аттестации: ', bold: true }),
+              new TextRun(conclusion.certificate)
+            ]
+          })] : []),
+          ...(conclusion.temperature ? [new Paragraph({
+            children: [
+              new TextRun({ text: 'Температура: ', bold: true }),
+              new TextRun(`${conclusion.temperature}°C`)
+            ]
+          })] : []),
+          new Paragraph({ text: '', spacing: { after: 200 } }),
+          ...(conclusion.defectDescription ? [
+            new Paragraph({
+              text: 'Описание выявленных дефектов:',
+              bold: true
+            }),
+            new Paragraph({ text: conclusion.defectDescription }),
+            new Paragraph({ text: '', spacing: { after: 200 } })
+          ] : []),
+          ...(conclusion.conclusion ? [
+            new Paragraph({
+              text: 'Заключение:',
+              bold: true
+            }),
+            new Paragraph({ text: conclusion.conclusion }),
+            new Paragraph({ text: '', spacing: { after: 200 } })
+          ] : []),
+          new Paragraph({
+            children: [
+              new TextRun({ text: 'Результат: ', bold: true }),
+              new TextRun({ text: conclusion.result.toUpperCase(), bold: true })
+            ]
+          })
+        ]
+      }]
+    });
+
+    const blob = await Packer.toBlob(doc);
+    saveAs(blob, `${conclusion.number}.docx`);
+    
+    toast({
+      title: 'Word экспортирован',
+      description: `Заключение ${conclusion.number} сохранено`
+    });
+  };
+
+  const addCustomer = () => {
+    const newCust: Customer = {
+      id: Date.now().toString(),
+      ...newCustomer
+    };
+    setCustomers([...customers, newCust]);
+    setNewCustomer({ name: '', inn: '', address: '', contactPerson: '', phone: '', email: '' });
+    setShowAddCustomer(false);
+    toast({ title: 'Заказчик добавлен' });
+  };
+
+  const addWelder = () => {
+    const newWeld: Welder = {
+      id: Date.now().toString(),
+      fullName: newWelder.fullName,
+      certificateNumber: newWelder.certificateNumber,
+      certificateDate: newWelder.certificateDate,
+      qualification: newWelder.qualification,
+      organization: newWelder.organization
+    };
+    setWelders([...welders, newWeld]);
+    setNewWelder({ fullName: '', certificateNumber: '', certificateDate: '', qualification: '', organization: '' });
+    setShowAddWelder(false);
+    toast({ title: 'Сварщик добавлен' });
+  };
+
+  const addPipeDiameter = () => {
+    const newPipe: PipeDiameter = {
+      id: Date.now().toString(),
+      ...newPipeDiameter
+    };
+    setPipeDiameters([...pipeDiameters, newPipe]);
+    setNewPipeDiameter({ diameter: '', wallThickness: '', material: '', gostStandard: '' });
+    setShowAddPipeDiameter(false);
+    toast({ title: 'Диаметр добавлен' });
+  };
+
+  const renderConclusionForm = () => (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="number">Номер заключения *</Label>
+          <Input
+            id="number"
+            value={formData.number}
+            onChange={(e) => setFormData({ ...formData, number: e.target.value })}
+            placeholder="НК-2024-XXX"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="date">Дата *</Label>
+          <Input
+            id="date"
+            type="date"
+            value={formData.date}
+            onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="objectName">Наименование объекта *</Label>
+          <Input
+            id="objectName"
+            value={formData.objectName}
+            onChange={(e) => setFormData({ ...formData, objectName: e.target.value })}
+            placeholder="МГ..."
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="customerId">Заказчик</Label>
+          <Select value={formData.customerId} onValueChange={(value) => setFormData({ ...formData, customerId: value })}>
+            <SelectTrigger>
+              <SelectValue placeholder="Выберите заказчика" />
+            </SelectTrigger>
+            <SelectContent>
+              {customers.map(c => (
+                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="weldNumber">Номер стыка *</Label>
+          <Input
+            id="weldNumber"
+            value={formData.weldNumber}
+            onChange={(e) => setFormData({ ...formData, weldNumber: e.target.value })}
+            placeholder="XX-XXX"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="welderId">Сварщик</Label>
+          <Select value={formData.welderId} onValueChange={(value) => setFormData({ ...formData, welderId: value })}>
+            <SelectTrigger>
+              <SelectValue placeholder="Выберите сварщика" />
+            </SelectTrigger>
+            <SelectContent>
+              {welders.map(w => (
+                <SelectItem key={w.id} value={w.id}>{w.fullName}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="pipeDiameterId">Диаметр трубы</Label>
+          <Select value={formData.pipeDiameterId} onValueChange={(value) => setFormData({ ...formData, pipeDiameterId: value })}>
+            <SelectTrigger>
+              <SelectValue placeholder="Выберите диаметр" />
+            </SelectTrigger>
+            <SelectContent>
+              {pipeDiameters.map(p => (
+                <SelectItem key={p.id} value={p.id}>{p.diameter}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="controlMethod">Метод контроля *</Label>
+          <Select value={formData.controlMethod} onValueChange={(value) => setFormData({ ...formData, controlMethod: value })}>
+            <SelectTrigger>
+              <SelectValue placeholder="Выберите метод" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="Ультразвуковой контроль">Ультразвуковой контроль</SelectItem>
+              <SelectItem value="Радиографический контроль">Радиографический контроль</SelectItem>
+              <SelectItem value="Визуальный контроль">Визуальный контроль</SelectItem>
+              <SelectItem value="Магнитопорошковый контроль">Магнитопорошковый контроль</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="equipment">Оборудование</Label>
+          <Input
+            id="equipment"
+            value={formData.equipment}
+            onChange={(e) => setFormData({ ...formData, equipment: e.target.value })}
+            placeholder="Марка, модель"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="normativeDoc">Нормативный документ</Label>
+        <Input
+          id="normativeDoc"
+          value={formData.normativeDoc}
+          onChange={(e) => setFormData({ ...formData, normativeDoc: e.target.value })}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="space-y-2">
+          <Label htmlFor="executor">Исполнитель</Label>
+          <Input
+            id="executor"
+            value={formData.executor}
+            onChange={(e) => setFormData({ ...formData, executor: e.target.value })}
+            placeholder="ФИО"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="certificate">Номер аттестации</Label>
+          <Input
+            id="certificate"
+            value={formData.certificate}
+            onChange={(e) => setFormData({ ...formData, certificate: e.target.value })}
+            placeholder="XXX-XX-XXXX"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="temperature">Температура, °C</Label>
+          <Input
+            id="temperature"
+            value={formData.temperature}
+            onChange={(e) => setFormData({ ...formData, temperature: e.target.value })}
+            placeholder="+20"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="defectDescription">Описание выявленных дефектов</Label>
+        <Textarea
+          id="defectDescription"
+          value={formData.defectDescription}
+          onChange={(e) => setFormData({ ...formData, defectDescription: e.target.value })}
+          rows={4}
+          placeholder="Подробное описание или 'Дефектов не выявлено'"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="conclusion">Заключение</Label>
+        <Textarea
+          id="conclusion"
+          value={formData.conclusion}
+          onChange={(e) => setFormData({ ...formData, conclusion: e.target.value })}
+          rows={3}
+          placeholder="Выводы по результатам контроля"
+        />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="result">Результат *</Label>
+        <Select value={formData.result} onValueChange={(value: 'допущено' | 'не допущено') => setFormData({ ...formData, result: value })}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="допущено">Допущено к эксплуатации</SelectItem>
+            <SelectItem value="не допущено">Не допущено к эксплуатации</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-secondary/30">
@@ -202,7 +717,7 @@ const Index = () => {
 
       <main className="container mx-auto px-6 py-8">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4 lg:w-[600px]">
+          <TabsList className="grid w-full grid-cols-5 lg:w-[700px]">
             <TabsTrigger value="list" className="flex items-center gap-2">
               <Icon name="List" size={16} />
               <span className="hidden sm:inline">Список</span>
@@ -210,6 +725,10 @@ const Index = () => {
             <TabsTrigger value="new" className="flex items-center gap-2">
               <Icon name="FilePlus" size={16} />
               <span className="hidden sm:inline">Новое</span>
+            </TabsTrigger>
+            <TabsTrigger value="database" className="flex items-center gap-2">
+              <Icon name="Database" size={16} />
+              <span className="hidden sm:inline">База</span>
             </TabsTrigger>
             <TabsTrigger value="templates" className="flex items-center gap-2">
               <Icon name="LayoutTemplate" size={16} />
@@ -286,14 +805,29 @@ const Index = () => {
                               </div>
                             </div>
                           </div>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleExportPDF(conclusion)}
-                            className="ml-4"
-                          >
-                            <Icon name="FileDown" size={16} />
-                          </Button>
+                          <div className="flex gap-2 ml-4">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleEditConclusion(conclusion)}
+                            >
+                              <Icon name="Edit" size={16} />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => exportToPDF(conclusion)}
+                            >
+                              <Icon name="FileDown" size={16} />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => exportToWord(conclusion)}
+                            >
+                              <Icon name="FileText" size={16} />
+                            </Button>
+                          </div>
                         </div>
                       </CardContent>
                     </Card>
@@ -343,150 +877,9 @@ const Index = () => {
                   </div>
                 </div>
               </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="number">Номер заключения *</Label>
-                    <Input
-                      id="number"
-                      value={formData.number}
-                      onChange={(e) => setFormData({ ...formData, number: e.target.value })}
-                      placeholder="НК-2024-XXX"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="date">Дата *</Label>
-                    <Input
-                      id="date"
-                      type="date"
-                      value={formData.date}
-                      onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="objectName">Наименование объекта *</Label>
-                    <Input
-                      id="objectName"
-                      value={formData.objectName}
-                      onChange={(e) => setFormData({ ...formData, objectName: e.target.value })}
-                      placeholder="МГ..."
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="weldNumber">Номер сварного стыка *</Label>
-                    <Input
-                      id="weldNumber"
-                      value={formData.weldNumber}
-                      onChange={(e) => setFormData({ ...formData, weldNumber: e.target.value })}
-                      placeholder="XX-XXX"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="controlMethod">Метод контроля *</Label>
-                    <Select value={formData.controlMethod} onValueChange={(value) => setFormData({ ...formData, controlMethod: value })}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Выберите метод" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Ультразвуковой контроль">Ультразвуковой контроль</SelectItem>
-                        <SelectItem value="Радиографический контроль">Радиографический контроль</SelectItem>
-                        <SelectItem value="Визуальный контроль">Визуальный контроль</SelectItem>
-                        <SelectItem value="Магнитопорошковый контроль">Магнитопорошковый контроль</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="equipment">Оборудование</Label>
-                    <Input
-                      id="equipment"
-                      value={formData.equipment}
-                      onChange={(e) => setFormData({ ...formData, equipment: e.target.value })}
-                      placeholder="Марка, модель"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="normativeDoc">Нормативный документ</Label>
-                  <Input
-                    id="normativeDoc"
-                    value={formData.normativeDoc}
-                    onChange={(e) => setFormData({ ...formData, normativeDoc: e.target.value })}
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="executor">Исполнитель</Label>
-                    <Input
-                      id="executor"
-                      value={formData.executor}
-                      onChange={(e) => setFormData({ ...formData, executor: e.target.value })}
-                      placeholder="ФИО"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="certificate">Номер аттестации</Label>
-                    <Input
-                      id="certificate"
-                      value={formData.certificate}
-                      onChange={(e) => setFormData({ ...formData, certificate: e.target.value })}
-                      placeholder="XXX-XX-XXXX"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="temperature">Температура, °C</Label>
-                    <Input
-                      id="temperature"
-                      value={formData.temperature}
-                      onChange={(e) => setFormData({ ...formData, temperature: e.target.value })}
-                      placeholder="+20"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="defectDescription">Описание выявленных дефектов</Label>
-                  <Textarea
-                    id="defectDescription"
-                    value={formData.defectDescription}
-                    onChange={(e) => setFormData({ ...formData, defectDescription: e.target.value })}
-                    rows={4}
-                    placeholder="Подробное описание или 'Дефектов не выявлено'"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="conclusion">Заключение</Label>
-                  <Textarea
-                    id="conclusion"
-                    value={formData.conclusion}
-                    onChange={(e) => setFormData({ ...formData, conclusion: e.target.value })}
-                    rows={3}
-                    placeholder="Выводы по результатам контроля"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="result">Результат *</Label>
-                  <Select value={formData.result} onValueChange={(value: 'допущено' | 'не допущено') => setFormData({ ...formData, result: value })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="допущено">Допущено к эксплуатации</SelectItem>
-                      <SelectItem value="не допущено">Не допущено к эксплуатации</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="flex justify-end gap-3 pt-4 border-t">
+              <CardContent>
+                {renderConclusionForm()}
+                <div className="flex justify-end gap-3 pt-4 border-t mt-6">
                   <Button variant="outline" onClick={() => setActiveTab('list')}>
                     Отмена
                   </Button>
@@ -497,6 +890,176 @@ const Index = () => {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="database" className="space-y-4 animate-fade-in">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center justify-between">
+                    Заказчики
+                    <Dialog open={showAddCustomer} onOpenChange={setShowAddCustomer}>
+                      <DialogTrigger asChild>
+                        <Button size="sm" variant="ghost">
+                          <Icon name="Plus" size={16} />
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Добавить заказчика</DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                          <div className="space-y-2">
+                            <Label>Название *</Label>
+                            <Input value={newCustomer.name} onChange={(e) => setNewCustomer({...newCustomer, name: e.target.value})} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>ИНН</Label>
+                            <Input value={newCustomer.inn} onChange={(e) => setNewCustomer({...newCustomer, inn: e.target.value})} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Адрес</Label>
+                            <Input value={newCustomer.address} onChange={(e) => setNewCustomer({...newCustomer, address: e.target.value})} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Контактное лицо</Label>
+                            <Input value={newCustomer.contactPerson} onChange={(e) => setNewCustomer({...newCustomer, contactPerson: e.target.value})} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Телефон</Label>
+                            <Input value={newCustomer.phone} onChange={(e) => setNewCustomer({...newCustomer, phone: e.target.value})} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Email</Label>
+                            <Input value={newCustomer.email} onChange={(e) => setNewCustomer({...newCustomer, email: e.target.value})} />
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button onClick={addCustomer}>Добавить</Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                    {customers.map(c => (
+                      <div key={c.id} className="p-3 border rounded-lg hover:bg-accent/50 transition-colors">
+                        <p className="font-medium text-sm">{c.name}</p>
+                        {c.inn && <p className="text-xs text-muted-foreground">ИНН: {c.inn}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center justify-between">
+                    Сварщики
+                    <Dialog open={showAddWelder} onOpenChange={setShowAddWelder}>
+                      <DialogTrigger asChild>
+                        <Button size="sm" variant="ghost">
+                          <Icon name="Plus" size={16} />
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Добавить сварщика</DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                          <div className="space-y-2">
+                            <Label>ФИО *</Label>
+                            <Input value={newWelder.fullName} onChange={(e) => setNewWelder({...newWelder, fullName: e.target.value})} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Номер удостоверения *</Label>
+                            <Input value={newWelder.certificateNumber} onChange={(e) => setNewWelder({...newWelder, certificateNumber: e.target.value})} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Дата аттестации</Label>
+                            <Input type="date" value={newWelder.certificateDate} onChange={(e) => setNewWelder({...newWelder, certificateDate: e.target.value})} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Квалификация</Label>
+                            <Input value={newWelder.qualification} onChange={(e) => setNewWelder({...newWelder, qualification: e.target.value})} />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Организация</Label>
+                            <Input value={newWelder.organization} onChange={(e) => setNewWelder({...newWelder, organization: e.target.value})} />
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button onClick={addWelder}>Добавить</Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                    {welders.map(w => (
+                      <div key={w.id} className="p-3 border rounded-lg hover:bg-accent/50 transition-colors">
+                        <p className="font-medium text-sm">{w.fullName}</p>
+                        <p className="text-xs text-muted-foreground">Удостоверение: {w.certificateNumber}</p>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center justify-between">
+                    Диаметры труб
+                    <Dialog open={showAddPipeDiameter} onOpenChange={setShowAddPipeDiameter}>
+                      <DialogTrigger asChild>
+                        <Button size="sm" variant="ghost">
+                          <Icon name="Plus" size={16} />
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Добавить диаметр</DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                          <div className="space-y-2">
+                            <Label>Диаметр *</Label>
+                            <Input value={newPipeDiameter.diameter} onChange={(e) => setNewPipeDiameter({...newPipeDiameter, diameter: e.target.value})} placeholder="Ø1420" />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Толщина стенки</Label>
+                            <Input value={newPipeDiameter.wallThickness} onChange={(e) => setNewPipeDiameter({...newPipeDiameter, wallThickness: e.target.value})} placeholder="18.7 мм" />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Материал</Label>
+                            <Input value={newPipeDiameter.material} onChange={(e) => setNewPipeDiameter({...newPipeDiameter, material: e.target.value})} placeholder="Сталь 17Г1С" />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>ГОСТ</Label>
+                            <Input value={newPipeDiameter.gostStandard} onChange={(e) => setNewPipeDiameter({...newPipeDiameter, gostStandard: e.target.value})} placeholder="ГОСТ 20295-85" />
+                          </div>
+                        </div>
+                        <DialogFooter>
+                          <Button onClick={addPipeDiameter}>Добавить</Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                    {pipeDiameters.map(p => (
+                      <div key={p.id} className="p-3 border rounded-lg hover:bg-accent/50 transition-colors">
+                        <p className="font-medium text-sm">{p.diameter}</p>
+                        {p.wallThickness && <p className="text-xs text-muted-foreground">Толщина: {p.wallThickness}</p>}
+                        {p.material && <p className="text-xs text-muted-foreground">{p.material}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
 
           <TabsContent value="templates" className="space-y-4 animate-fade-in">
@@ -553,6 +1116,24 @@ const Index = () => {
           </TabsContent>
         </Tabs>
       </main>
+
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Редактировать заключение</DialogTitle>
+          </DialogHeader>
+          {renderConclusionForm()}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setIsEditDialogOpen(false); resetForm(); }}>
+              Отмена
+            </Button>
+            <Button onClick={handleSaveConclusion}>
+              <Icon name="Save" size={16} className="mr-2" />
+              Сохранить изменения
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
