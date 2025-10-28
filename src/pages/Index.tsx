@@ -114,10 +114,39 @@ const Index = () => {
   const [showAddCustomer, setShowAddCustomer] = useState(false);
   const [showAddWelder, setShowAddWelder] = useState(false);
   const [showAddPipeDiameter, setShowAddPipeDiameter] = useState(false);
+  const [showNumbersDialog, setShowNumbersDialog] = useState(false);
+  const [numberPrefix, setNumberPrefix] = useState('НК');
+  const [currentYear] = useState(new Date().getFullYear());
 
   useEffect(() => {
     loadData();
+    generateNextNumber();
   }, []);
+
+  const generateNextNumber = () => {
+    if (conclusions.length === 0) {
+      setFormData(prev => ({ ...prev, number: `${numberPrefix}-${currentYear}-001` }));
+      return;
+    }
+    
+    const currentYearConclusions = conclusions.filter(c => 
+      c.number.includes(`-${currentYear}-`)
+    );
+    
+    if (currentYearConclusions.length === 0) {
+      setFormData(prev => ({ ...prev, number: `${numberPrefix}-${currentYear}-001` }));
+      return;
+    }
+    
+    const numbers = currentYearConclusions.map(c => {
+      const match = c.number.match(/-\d{4}-(\d+)$/);
+      return match ? parseInt(match[1], 10) : 0;
+    });
+    
+    const maxNumber = Math.max(...numbers);
+    const nextNumber = String(maxNumber + 1).padStart(3, '0');
+    setFormData(prev => ({ ...prev, number: `${numberPrefix}-${currentYear}-${nextNumber}` }));
+  };
 
   const loadData = async () => {
     try {
@@ -208,11 +237,13 @@ const Index = () => {
     }
     
     resetForm();
+    generateNextNumber();
   };
 
   const resetForm = () => {
+    const currentNumber = formData.number;
     setFormData({
-      number: '',
+      number: currentNumber,
       date: new Date().toISOString().split('T')[0],
       objectName: '',
       customerId: '',
@@ -513,12 +544,24 @@ const Index = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label htmlFor="number">Номер заключения *</Label>
-          <Input
-            id="number"
-            value={formData.number}
-            onChange={(e) => setFormData({ ...formData, number: e.target.value })}
-            placeholder="НК-2024-XXX"
-          />
+          <div className="flex gap-2">
+            <Input
+              id="number"
+              value={formData.number}
+              onChange={(e) => setFormData({ ...formData, number: e.target.value })}
+              placeholder="НК-2024-XXX"
+              className="flex-1"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={generateNextNumber}
+              title="Сгенерировать следующий"
+            >
+              <Icon name="RefreshCw" size={16} />
+            </Button>
+          </div>
         </div>
         <div className="space-y-2">
           <Label htmlFor="date">Дата *</Label>
@@ -708,9 +751,85 @@ const Index = () => {
                 <p className="text-sm text-muted-foreground">Система выдачи заключений по НК</p>
               </div>
             </div>
-            <Badge variant="outline" className="text-xs font-normal">
-              СТО Газпром 15-1.3-004-2023
-            </Badge>
+            <div className="flex items-center gap-3">
+              <Dialog open={showNumbersDialog} onOpenChange={setShowNumbersDialog}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Icon name="Hash" size={16} className="mr-2" />
+                    Номера
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle>Список номеров заключений</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <div className="space-y-2 flex-1">
+                        <Label>Префикс номера</Label>
+                        <Input
+                          value={numberPrefix}
+                          onChange={(e) => setNumberPrefix(e.target.value.toUpperCase())}
+                          placeholder="НК"
+                          className="max-w-[150px]"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Следующий номер</Label>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="secondary" className="text-base px-4 py-2">
+                            {formData.number}
+                          </Badge>
+                          <Button size="sm" variant="ghost" onClick={generateNextNumber}>
+                            <Icon name="RefreshCw" size={16} />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="border rounded-lg">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>№</TableHead>
+                            <TableHead>Номер заключения</TableHead>
+                            <TableHead>Дата</TableHead>
+                            <TableHead>Объект</TableHead>
+                            <TableHead>Статус</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {conclusions.length === 0 ? (
+                            <TableRow>
+                              <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
+                                Заключений пока нет
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            conclusions.map((c, index) => (
+                              <TableRow key={c.id}>
+                                <TableCell className="font-medium">{index + 1}</TableCell>
+                                <TableCell className="font-mono">{c.number}</TableCell>
+                                <TableCell>{new Date(c.date).toLocaleDateString('ru-RU')}</TableCell>
+                                <TableCell>{c.objectName}</TableCell>
+                                <TableCell>
+                                  <Badge variant={c.result === 'допущено' ? 'default' : 'destructive'}>
+                                    {c.result}
+                                  </Badge>
+                                </TableCell>
+                              </TableRow>
+                            ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+              <Badge variant="outline" className="text-xs font-normal">
+                СТО Газпром 15-1.3-004-2023
+              </Badge>
+            </div>
           </div>
         </div>
       </header>
@@ -841,7 +960,12 @@ const Index = () => {
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle>Новое заключение</CardTitle>
+                  <div>
+                    <CardTitle>Новое заключение</CardTitle>
+                    <CardDescription className="mt-1">
+                      Следующий номер: <span className="font-mono font-semibold text-foreground">{formData.number}</span>
+                    </CardDescription>
+                  </div>
                   <div className="flex gap-2">
                     <Dialog>
                       <DialogTrigger asChild>
