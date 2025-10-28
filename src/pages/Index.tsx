@@ -494,98 +494,139 @@ const Index = () => {
 
   const exportToExcel = (conclusion: Conclusion) => {
     const wb = XLSX.utils.book_new();
-    
     const wsData: any[][] = [];
     
-    wsData.push(['ЗАКЛЮЧЕНИЕ № ' + conclusion.number]);
-    wsData.push(['от ' + new Date(conclusion.date).toLocaleDateString('ru-RU') + ' г.']);
-    wsData.push([]);
+    let currentRow = 0;
     
-    wsData.push(['Наименование лаборатории:', conclusion.labName]);
-    if (conclusion.labAddress) wsData.push(['Адрес:', conclusion.labAddress]);
-    if (conclusion.labPhone) wsData.push(['Телефон:', conclusion.labPhone]);
-    if (conclusion.labAccreditation) wsData.push(['Аттестат аккредитации:', conclusion.labAccreditation]);
-    wsData.push([]);
+    wsData[currentRow++] = ['Наименование лаборатории:', conclusion.labName, '', '', 'Уровень квалификации:', '', '', ''];
+    wsData[currentRow++] = ['Приказ о назначении:', '', '', '', 'Объект контроля:', conclusion.objectName, '', ''];
+    wsData[currentRow++] = ['Номер приказа:', '', '', '', 'Обозначение участка:', conclusion.pipelineSection || '', '', ''];
+    wsData[currentRow++] = ['Программа испытаний:', '', '', '', 'Участок труб-да, км км привязки:', '', '', ''];
+    wsData[currentRow++] = ['', '', '', '', 'Наименование организации:', '', '', ''];
+    wsData[currentRow++] = ['Средства', 'Источник', 'Изотоп-', '', 'Назначение организации:', '', '', ''];
+    wsData[currentRow++] = ['контроля', 'контроля', 'ный излучатель', '', 'Производитель работ', '', '', ''];
+    wsData[currentRow++] = ['', 'тип аппарата', '', '', 'Произв. работ по заказу:', '', '', ''];
+    wsData[currentRow++] = ['', 'тип дефектоскопа', '', '', 'Шифр проекта или схемы трассы:', '', '', ''];
+    wsData[currentRow++] = ['', '', '', '', '', '', '', ''];
+    wsData[currentRow++] = ['', '', '', '', '', '', '', ''];
     
-    wsData.push(['Наименование объекта:', conclusion.objectName]);
-    if (conclusion.objectAddress) wsData.push(['Адрес объекта:', conclusion.objectAddress]);
-    if (conclusion.customerName) wsData.push(['Заказчик:', conclusion.customerName]);
-    if (conclusion.pipelineSection) wsData.push(['Участок трубопровода:', conclusion.pipelineSection]);
-    wsData.push([]);
+    const titleRow = currentRow;
+    wsData[currentRow++] = ['', '', '', `ЗАКЛЮЧЕНИЕ №  ${conclusion.number}`, '', '', '', ''];
+    wsData[currentRow++] = ['', '', '', `от "${new Date(conclusion.date).getDate()}" ${new Date(conclusion.date).toLocaleDateString('ru-RU', {month: 'long'})} ${new Date(conclusion.date).getFullYear()}г.`, '', '', '', ''];
+    wsData[currentRow++] = ['', '', '', '', '', '', '', ''];
+    wsData[currentRow++] = ['', '', '', `по результатам контроля качества сварных соединений радиографическим и ультразвуковыми методами (${conclusion.controlMethod})`, '', '', '', ''];
+    wsData[currentRow++] = ['', '', '', '', '', '', '', ''];
     
-    wsData.push(['Источник контроля:', conclusion.controlMethod]);
-    if (conclusion.equipment) wsData.push(['Оборудование:', conclusion.equipment]);
-    if (conclusion.sensitivity) wsData.push(['Чувствительность:', conclusion.sensitivity]);
-    if (conclusion.normativeDoc) wsData.push(['Нормативный документ:', conclusion.normativeDoc]);
-    wsData.push([]);
+    const tableHeaderRow = currentRow;
+    wsData[currentRow++] = ['', '', '', 'РЕЗУЛЬТАТЫ КОНТРОЛЯ', '', '', '', ''];
+    wsData[currentRow++] = ['', '', '', '', '', '', '', ''];
     
-    if (conclusion.executor) wsData.push(['Исполнитель:', conclusion.executor]);
-    if (conclusion.certificate) wsData.push(['Удостоверение №:', conclusion.certificate]);
-    if (conclusion.certificateDate) wsData.push(['Дата аттестации:', new Date(conclusion.certificateDate).toLocaleDateString('ru-RU')]);
-    wsData.push([]);
-    wsData.push([]);
-    
-    wsData.push(['РЕЗУЛЬТАТЫ КОНТРОЛЯ']);
-    wsData.push([]);
-    
-    wsData.push([
-      '№',
-      'Номер стыка',
-      'Диаметр стыка',
-      'Толщина',
-      'Сварщик',
+    wsData[currentRow] = [
+      'Номер сварного соединения на стыке по деф. журналу',
+      'Диаметр и толщина стенки стыка, мм',
+      'Номер удостоверения сварщика',
       'Описание выявленных дефектов',
-      'Местоположение',
-      'Размер',
-      'Результат',
-      'Примечание'
-    ]);
+      'Наличие дефекта (гладь, корень, лицевая)',
+      'Примечание',
+      ''
+    ];
+    currentRow++;
+    
+    wsData[currentRow] = ['1', '2', '3', '4', '5', '6', '7'];
+    currentRow++;
+    
+    const dataStartRow = currentRow;
     
     if (conclusion.defects && conclusion.defects.length > 0) {
       conclusion.defects.forEach((defect, index) => {
-        wsData.push([
-          index + 1,
+        wsData[currentRow] = [
           defect.weldNumber,
-          defect.diameter || '-',
-          defect.wallThickness || '-',
+          `${defect.diameter || ''} x ${defect.wallThickness || ''}`,
           defect.welderName || '-',
-          defect.defectDescription || 'Дефектов не обнаружено',
-          defect.defectLocation || '-',
-          defect.defectSize || '-',
+          defect.defectDescription || 'дефектов не обнаружено',
+          defect.defectLocation || 'гладь',
           defect.result,
           ''
-        ]);
+        ];
+        currentRow++;
       });
+    } else {
+      for (let i = 0; i < 15; i++) {
+        wsData[currentRow] = ['', '', '', '', '', '', ''];
+        currentRow++;
+      }
     }
     
-    wsData.push([]);
-    wsData.push([]);
+    wsData[currentRow++] = ['', '', '', '', '', '', ''];
+    wsData[currentRow++] = ['', '', '', '', '', '', ''];
     
-    if (conclusion.conclusionText) {
-      wsData.push(['ЗАКЛЮЧЕНИЕ:']);
-      wsData.push([conclusion.conclusionText]);
-      wsData.push([]);
-    }
-    
-    const resultText = conclusion.result === 'допущено' 
-      ? 'ДОПУЩЕНО К ЭКСПЛУАТАЦИИ'
-      : 'НЕ ДОПУЩЕНО К ЭКСПЛУАТАЦИИ';
-    wsData.push(['ИТОГОВОЕ РЕШЕНИЕ: ' + resultText]);
+    const conclusionRow = currentRow;
+    wsData[currentRow++] = ['Контролер провел:', '', '', '', '', '', ''];
+    wsData[currentRow++] = ['', '', '', '', '', '', ''];
+    wsData[currentRow++] = ['', '', '', `Дата: ${new Date(conclusion.date).toLocaleDateString('ru-RU')}`, '', '', ''];
     
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     
+    const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+    
+    for (let R = dataStartRow - 2; R < currentRow - 3; R++) {
+      for (let C = 0; C <= 6; C++) {
+        const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+        if (!ws[cellAddress]) ws[cellAddress] = { t: 's', v: '' };
+        if (!ws[cellAddress].s) ws[cellAddress].s = {};
+        ws[cellAddress].s = {
+          border: {
+            top: { style: 'thin', color: { rgb: '000000' } },
+            bottom: { style: 'thin', color: { rgb: '000000' } },
+            left: { style: 'thin', color: { rgb: '000000' } },
+            right: { style: 'thin', color: { rgb: '000000' } }
+          },
+          alignment: { vertical: 'center', horizontal: 'center', wrapText: true }
+        };
+      }
+    }
+    
     ws['!cols'] = [
-      { wch: 5 },
-      { wch: 15 },
-      { wch: 15 },
+      { wch: 18 },
       { wch: 12 },
-      { wch: 25 },
-      { wch: 40 },
-      { wch: 15 },
+      { wch: 18 },
+      { wch: 35 },
+      { wch: 20 },
       { wch: 12 },
-      { wch: 12 },
-      { wch: 20 }
+      { wch: 15 }
     ];
+    
+    ws['!rows'] = [];
+    for (let i = 0; i < currentRow; i++) {
+      ws['!rows'][i] = { hpt: 20 };
+    }
+    ws['!rows'][titleRow] = { hpt: 25 };
+    ws['!rows'][titleRow + 1] = { hpt: 20 };
+    ws['!rows'][tableHeaderRow] = { hpt: 25 };
+    
+    const titleCell = XLSX.utils.encode_cell({ r: titleRow, c: 3 });
+    if (ws[titleCell]) {
+      ws[titleCell].s = {
+        font: { bold: true, sz: 14 },
+        alignment: { horizontal: 'center', vertical: 'center' }
+      };
+    }
+    
+    const tableHeaderCell = XLSX.utils.encode_cell({ r: tableHeaderRow, c: 3 });
+    if (ws[tableHeaderCell]) {
+      ws[tableHeaderCell].s = {
+        font: { bold: true, sz: 12 },
+        alignment: { horizontal: 'center', vertical: 'center' }
+      };
+    }
+    
+    if (!ws['!merges']) ws['!merges'] = [];
+    ws['!merges'].push(
+      { s: { r: titleRow, c: 2 }, e: { r: titleRow, c: 5 } },
+      { s: { r: titleRow + 1, c: 2 }, e: { r: titleRow + 1, c: 5 } },
+      { s: { r: titleRow + 3, c: 2 }, e: { r: titleRow + 3, c: 6 } },
+      { s: { r: tableHeaderRow, c: 2 }, e: { r: tableHeaderRow, c: 5 } }
+    );
     
     XLSX.utils.book_append_sheet(wb, ws, 'Заключение');
     
