@@ -14,10 +14,14 @@ import Icon from '@/components/ui/icon';
 import { useToast } from '@/hooks/use-toast';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
+import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, Table as DocxTable, TableRow as DocxTableRow, TableCell as DocxTableCell, WidthType, BorderStyle } from 'docx';
+import { saveAs } from 'file-saver';
 
 interface DefectRecord {
   id: string;
   weldNumber: string;
+  welderId?: string;
+  welderName?: string;
   diameter: string;
   wallThickness: string;
   defectDescription: string;
@@ -79,12 +83,22 @@ interface PipeDiameter {
   gostStandard?: string;
 }
 
+interface Welder {
+  id: string;
+  fullName: string;
+  certificateNumber: string;
+  certificateDate?: string;
+  qualification?: string;
+  organization?: string;
+}
+
 const Index = () => {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('list');
   const [conclusions, setConclusions] = useState<Conclusion[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [pipeDiameters, setPipeDiameters] = useState<PipeDiameter[]>([]);
+  const [welders, setWelders] = useState<Welder[]>([]);
   
   const [searchTerm, setSearchTerm] = useState('');
   const [filterMethod, setFilterMethod] = useState<string>('all');
@@ -130,6 +144,7 @@ const Index = () => {
   const [defects, setDefects] = useState<DefectRecord[]>([]);
   const [newDefect, setNewDefect] = useState({
     weldNumber: '',
+    welderId: '',
     diameter: '',
     wallThickness: '',
     defectDescription: '',
@@ -173,13 +188,15 @@ const Index = () => {
 
   const loadData = async () => {
     try {
-      const [customersRes, pipesRes] = await Promise.all([
+      const [customersRes, pipesRes, weldersRes] = await Promise.all([
         fetch('/api/customers').catch(() => ({ ok: false })),
-        fetch('/api/pipe-diameters').catch(() => ({ ok: false }))
+        fetch('/api/pipe-diameters').catch(() => ({ ok: false })),
+        fetch('/api/welders').catch(() => ({ ok: false }))
       ]);
 
       if (customersRes.ok) setCustomers(await customersRes.json());
       if (pipesRes.ok) setPipeDiameters(await pipesRes.json());
+      if (weldersRes.ok) setWelders(await weldersRes.json());
     } catch (error) {
       console.log('Загрузка данных из базы не удалась');
     }
@@ -315,9 +332,16 @@ const Index = () => {
       return;
     }
     
-    setDefects([...defects, { ...newDefect, id: Date.now().toString() }]);
+    const welder = welders.find(w => w.id === newDefect.welderId);
+    
+    setDefects([...defects, { 
+      ...newDefect, 
+      id: Date.now().toString(),
+      welderName: welder?.fullName 
+    }]);
     setNewDefect({
       weldNumber: '',
+      welderId: '',
       diameter: formData.pipeDiameter,
       wallThickness: formData.wallThickness,
       defectDescription: '',
@@ -346,50 +370,260 @@ const Index = () => {
   const exportToPDF = (conclusion: Conclusion) => {
     const doc = new jsPDF();
     
-    doc.setFontSize(14);
+    doc.setFontSize(16);
     doc.text('ЗАКЛЮЧЕНИЕ', 105, 20, { align: 'center' });
+    doc.setFontSize(14);
     doc.text(`№ ${conclusion.number}`, 105, 28, { align: 'center' });
-    doc.text(`от ${new Date(conclusion.date).toLocaleDateString('ru-RU')}`, 105, 35, { align: 'center' });
-    
     doc.setFontSize(10);
+    doc.text(`от ${new Date(conclusion.date).toLocaleDateString('ru-RU')} г.`, 105, 35, { align: 'center' });
+    
     let y = 50;
     
-    doc.text(`Лаборатория: ${conclusion.labName}`, 20, y);
+    doc.setFontSize(11);
+    doc.text('ДАННЫЕ ЛАБОРАТОРИИ', 20, y);
     y += 7;
+    doc.setFontSize(9);
+    doc.text(`Наименование: ${conclusion.labName}`, 20, y);
+    y += 5;
+    if (conclusion.labAddress) {
+      doc.text(`Адрес: ${conclusion.labAddress}`, 20, y);
+      y += 5;
+    }
+    if (conclusion.labAccreditation) {
+      doc.text(`Аттестат аккредитации: ${conclusion.labAccreditation}`, 20, y);
+      y += 5;
+    }
+    y += 5;
+    
+    doc.setFontSize(11);
+    doc.text('ДАННЫЕ ОБЪЕКТА', 20, y);
+    y += 7;
+    doc.setFontSize(9);
     doc.text(`Объект: ${conclusion.objectName}`, 20, y);
+    y += 5;
+    if (conclusion.customerName) {
+      doc.text(`Заказчик: ${conclusion.customerName}`, 20, y);
+      y += 5;
+    }
+    if (conclusion.pipelineSection) {
+      doc.text(`Участок: ${conclusion.pipelineSection}`, 20, y);
+      y += 5;
+    }
+    y += 5;
+    
+    doc.setFontSize(11);
+    doc.text('ПАРАМЕТРЫ КОНТРОЛЯ', 20, y);
     y += 7;
-    doc.text(`Метод контроля: ${conclusion.controlMethod}`, 20, y);
-    y += 15;
+    doc.setFontSize(9);
+    doc.text(`Метод: ${conclusion.controlMethod}`, 20, y);
+    y += 5;
+    if (conclusion.equipment) {
+      doc.text(`Оборудование: ${conclusion.equipment}`, 20, y);
+      y += 5;
+    }
+    if (conclusion.normativeDoc) {
+      doc.text(`Норм. документ: ${conclusion.normativeDoc}`, 20, y);
+      y += 5;
+    }
+    if (conclusion.executor) {
+      doc.text(`Исполнитель: ${conclusion.executor}`, 20, y);
+      y += 5;
+    }
+    y += 8;
     
     if (conclusion.defects && conclusion.defects.length > 0) {
+      doc.setFontSize(11);
+      doc.text('РЕЗУЛЬТАТЫ КОНТРОЛЯ', 20, y);
+      y += 7;
+      
       const tableData = conclusion.defects.map((d, i) => [
         i + 1,
         d.weldNumber,
-        d.diameter,
+        d.welderName || '-',
+        d.diameter || '-',
         d.defectDescription || 'Дефектов не обнаружено',
         d.defectLocation || '-',
+        d.defectSize || '-',
         d.result
       ]);
       
       (doc as any).autoTable({
         startY: y,
-        head: [['№', 'Стык', 'Диаметр', 'Описание дефекта', 'Местоположение', 'Результат']],
+        head: [['№', 'Стык', 'Сварщик', 'Диам.', 'Описание дефекта', 'Полож.', 'Размер', 'Рез.']],
         body: tableData,
         theme: 'grid',
-        headStyles: { fillColor: [200, 200, 200], textColor: 0 },
-        styles: { fontSize: 8, cellPadding: 3 }
+        headStyles: { fillColor: [220, 220, 220], textColor: 0, fontSize: 8, fontStyle: 'bold' },
+        styles: { fontSize: 8, cellPadding: 2, overflow: 'linebreak' },
+        columnStyles: {
+          0: { cellWidth: 10 },
+          1: { cellWidth: 20 },
+          2: { cellWidth: 35 },
+          3: { cellWidth: 20 },
+          4: { cellWidth: 50 },
+          5: { cellWidth: 20 },
+          6: { cellWidth: 15 },
+          7: { cellWidth: 15 }
+        }
       });
       
       y = (doc as any).lastAutoTable.finalY + 10;
     }
     
+    if (conclusion.conclusionText) {
+      doc.setFontSize(10);
+      const splitText = doc.splitTextToSize(conclusion.conclusionText, 170);
+      doc.text(splitText, 20, y);
+      y += splitText.length * 5 + 5;
+    }
+    
     doc.setFontSize(12);
-    doc.text(`Заключение: ${conclusion.result.toUpperCase()}`, 20, y);
+    doc.setFont(undefined, 'bold');
+    const resultText = conclusion.result === 'допущено' 
+      ? 'ЗАКЛЮЧЕНИЕ: ДОПУЩЕНО К ЭКСПЛУАТАЦИИ'
+      : 'ЗАКЛЮЧЕНИЕ: НЕ ДОПУЩЕНО К ЭКСПЛУАТАЦИИ';
+    doc.text(resultText, 105, y, { align: 'center' });
     
     doc.save(`${conclusion.number}.pdf`);
     
     toast({
       title: 'PDF экспортирован',
+      description: `Заключение ${conclusion.number} сохранено`
+    });
+  };
+
+  const exportToWord = async (conclusion: Conclusion) => {
+    const doc = new Document({
+      sections: [{
+        properties: {},
+        children: [
+          new Paragraph({
+            text: 'ЗАКЛЮЧЕНИЕ',
+            heading: HeadingLevel.HEADING_1,
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 200 }
+          }),
+          new Paragraph({
+            text: `№ ${conclusion.number}`,
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 100 }
+          }),
+          new Paragraph({
+            text: `от ${new Date(conclusion.date).toLocaleDateString('ru-RU')} г.`,
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 400 }
+          }),
+          new Paragraph({
+            text: 'ДАННЫЕ ЛАБОРАТОРИИ',
+            heading: HeadingLevel.HEADING_2,
+            spacing: { before: 200, after: 100 }
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({ text: 'Наименование: ', bold: true }),
+              new TextRun(conclusion.labName)
+            ]
+          }),
+          ...(conclusion.labAddress ? [new Paragraph({
+            children: [
+              new TextRun({ text: 'Адрес: ', bold: true }),
+              new TextRun(conclusion.labAddress)
+            ]
+          })] : []),
+          new Paragraph({
+            text: 'ДАННЫЕ ОБЪЕКТА',
+            heading: HeadingLevel.HEADING_2,
+            spacing: { before: 300, after: 100 }
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({ text: 'Объект: ', bold: true }),
+              new TextRun(conclusion.objectName)
+            ]
+          }),
+          ...(conclusion.customerName ? [new Paragraph({
+            children: [
+              new TextRun({ text: 'Заказчик: ', bold: true }),
+              new TextRun(conclusion.customerName)
+            ]
+          })] : []),
+          new Paragraph({
+            text: 'ПАРАМЕТРЫ КОНТРОЛЯ',
+            heading: HeadingLevel.HEADING_2,
+            spacing: { before: 300, after: 100 }
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({ text: 'Метод контроля: ', bold: true }),
+              new TextRun(conclusion.controlMethod)
+            ]
+          }),
+          ...(conclusion.equipment ? [new Paragraph({
+            children: [
+              new TextRun({ text: 'Оборудование: ', bold: true }),
+              new TextRun(conclusion.equipment)
+            ]
+          })] : []),
+          ...(conclusion.defects && conclusion.defects.length > 0 ? [
+            new Paragraph({
+              text: 'РЕЗУЛЬТАТЫ КОНТРОЛЯ',
+              heading: HeadingLevel.HEADING_2,
+              spacing: { before: 300, after: 200 }
+            }),
+            new DocxTable({
+              rows: [
+                new DocxTableRow({
+                  children: [
+                    new DocxTableCell({ children: [new Paragraph({ text: '№', bold: true })] }),
+                    new DocxTableCell({ children: [new Paragraph({ text: 'Стык', bold: true })] }),
+                    new DocxTableCell({ children: [new Paragraph({ text: 'Сварщик', bold: true })] }),
+                    new DocxTableCell({ children: [new Paragraph({ text: 'Описание дефекта', bold: true })] }),
+                    new DocxTableCell({ children: [new Paragraph({ text: 'Результат', bold: true })] })
+                  ]
+                }),
+                ...conclusion.defects.map((d, i) => 
+                  new DocxTableRow({
+                    children: [
+                      new DocxTableCell({ children: [new Paragraph((i + 1).toString())] }),
+                      new DocxTableCell({ children: [new Paragraph(d.weldNumber)] }),
+                      new DocxTableCell({ children: [new Paragraph(d.welderName || '-')] }),
+                      new DocxTableCell({ children: [new Paragraph(d.defectDescription || 'Дефектов не обнаружено')] }),
+                      new DocxTableCell({ children: [new Paragraph(d.result)] })
+                    ]
+                  })
+                )
+              ]
+            })
+          ] : []),
+          ...(conclusion.conclusionText ? [
+            new Paragraph({
+              text: 'ЗАКЛЮЧЕНИЕ',
+              heading: HeadingLevel.HEADING_2,
+              spacing: { before: 300, after: 100 }
+            }),
+            new Paragraph({ text: conclusion.conclusionText })
+          ] : []),
+          new Paragraph({
+            children: [
+              new TextRun({ 
+                text: conclusion.result === 'допущено' 
+                  ? 'ИТОГ: ДОПУЩЕНО К ЭКСПЛУАТАЦИИ'
+                  : 'ИТОГ: НЕ ДОПУЩЕНО К ЭКСПЛУАТАЦИИ',
+                bold: true,
+                size: 28
+              })
+            ],
+            alignment: AlignmentType.CENTER,
+            spacing: { before: 400 }
+          })
+        ]
+      }]
+    });
+
+    const blob = await Packer.toBlob(doc);
+    saveAs(blob, `${conclusion.number}.docx`);
+    
+    toast({
+      title: 'Word экспортирован',
       description: `Заключение ${conclusion.number} сохранено`
     });
   };
@@ -633,7 +867,7 @@ const Index = () => {
         <CardContent className="space-y-4">
           <div className="border rounded-lg p-4 space-y-4 bg-secondary/20">
             <h4 className="font-medium text-sm">Добавить запись о дефекте</h4>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
               <div className="space-y-2">
                 <Label className="text-xs">Номер стыка *</Label>
                 <Input
@@ -642,6 +876,19 @@ const Index = () => {
                   placeholder="250х150"
                   className="h-9"
                 />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs">Сварщик</Label>
+                <Select value={newDefect.welderId} onValueChange={(value) => setNewDefect({ ...newDefect, welderId: value })}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Выберите" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {welders.map(w => (
+                      <SelectItem key={w.id} value={w.id}>{w.fullName}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label className="text-xs">Диаметр</Label>
@@ -661,7 +908,7 @@ const Index = () => {
                   className="h-9"
                 />
               </div>
-              <div className="space-y-2 md:col-span-2">
+              <div className="space-y-2 md:col-span-3">
                 <Label className="text-xs">Описание дефекта</Label>
                 <Input
                   value={newDefect.defectDescription}
@@ -716,6 +963,7 @@ const Index = () => {
                   <TableRow>
                     <TableHead className="w-12">№</TableHead>
                     <TableHead>Стык</TableHead>
+                    <TableHead>Сварщик</TableHead>
                     <TableHead>Диаметр</TableHead>
                     <TableHead>Описание дефекта</TableHead>
                     <TableHead>Положение</TableHead>
@@ -729,6 +977,7 @@ const Index = () => {
                     <TableRow key={defect.id}>
                       <TableCell className="font-medium">{index + 1}</TableCell>
                       <TableCell>{defect.weldNumber}</TableCell>
+                      <TableCell className="text-sm">{defect.welderName || '-'}</TableCell>
                       <TableCell>{defect.diameter}</TableCell>
                       <TableCell className="max-w-xs truncate">{defect.defectDescription}</TableCell>
                       <TableCell>{defect.defectLocation}</TableCell>
@@ -885,7 +1134,7 @@ const Index = () => {
 
       <main className="container mx-auto px-6 py-8">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3 lg:w-[500px]">
+          <TabsList className="grid w-full grid-cols-4 lg:w-[650px]">
             <TabsTrigger value="list" className="flex items-center gap-2">
               <Icon name="List" size={16} />
               <span className="hidden sm:inline">Список</span>
@@ -893,6 +1142,10 @@ const Index = () => {
             <TabsTrigger value="new" className="flex items-center gap-2">
               <Icon name="FilePlus" size={16} />
               <span className="hidden sm:inline">Новое</span>
+            </TabsTrigger>
+            <TabsTrigger value="database" className="flex items-center gap-2">
+              <Icon name="Database" size={16} />
+              <span className="hidden sm:inline">База</span>
             </TabsTrigger>
             <TabsTrigger value="archive" className="flex items-center gap-2">
               <Icon name="Archive" size={16} />
@@ -975,6 +1228,7 @@ const Index = () => {
                               size="sm"
                               variant="ghost"
                               onClick={() => handleEditConclusion(conclusion)}
+                              title="Редактировать"
                             >
                               <Icon name="Edit" size={16} />
                             </Button>
@@ -982,8 +1236,17 @@ const Index = () => {
                               size="sm"
                               variant="ghost"
                               onClick={() => exportToPDF(conclusion)}
+                              title="Экспорт в PDF"
                             >
                               <Icon name="FileDown" size={16} />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => exportToWord(conclusion)}
+                              title="Экспорт в Word"
+                            >
+                              <Icon name="FileText" size={16} />
                             </Button>
                           </div>
                         </div>
@@ -1031,6 +1294,43 @@ const Index = () => {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="database" className="space-y-4 animate-fade-in">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Заказчики</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                    {customers.map(c => (
+                      <div key={c.id} className="p-3 border rounded-lg hover:bg-accent/50 transition-colors">
+                        <p className="font-medium text-sm">{c.name}</p>
+                        {c.inn && <p className="text-xs text-muted-foreground">ИНН: {c.inn}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Сварщики</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2 max-h-[400px] overflow-y-auto">
+                    {welders.map(w => (
+                      <div key={w.id} className="p-3 border rounded-lg hover:bg-accent/50 transition-colors">
+                        <p className="font-medium text-sm">{w.fullName}</p>
+                        <p className="text-xs text-muted-foreground">Удостоверение: {w.certificateNumber}</p>
+                        {w.qualification && <p className="text-xs text-muted-foreground">{w.qualification}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
 
           <TabsContent value="archive" className="animate-fade-in">
