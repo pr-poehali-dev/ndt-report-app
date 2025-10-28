@@ -16,6 +16,7 @@ import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, Table as DocxTable, TableRow as DocxTableRow, TableCell as DocxTableCell, WidthType, BorderStyle } from 'docx';
 import { saveAs } from 'file-saver';
+import * as XLSX from 'xlsx';
 
 interface DefectRecord {
   id: string;
@@ -487,6 +488,111 @@ const Index = () => {
     
     toast({
       title: 'PDF экспортирован',
+      description: `Заключение ${conclusion.number} сохранено`
+    });
+  };
+
+  const exportToExcel = (conclusion: Conclusion) => {
+    const wb = XLSX.utils.book_new();
+    
+    const wsData: any[][] = [];
+    
+    wsData.push(['ЗАКЛЮЧЕНИЕ № ' + conclusion.number]);
+    wsData.push(['от ' + new Date(conclusion.date).toLocaleDateString('ru-RU') + ' г.']);
+    wsData.push([]);
+    
+    wsData.push(['Наименование лаборатории:', conclusion.labName]);
+    if (conclusion.labAddress) wsData.push(['Адрес:', conclusion.labAddress]);
+    if (conclusion.labPhone) wsData.push(['Телефон:', conclusion.labPhone]);
+    if (conclusion.labAccreditation) wsData.push(['Аттестат аккредитации:', conclusion.labAccreditation]);
+    wsData.push([]);
+    
+    wsData.push(['Наименование объекта:', conclusion.objectName]);
+    if (conclusion.objectAddress) wsData.push(['Адрес объекта:', conclusion.objectAddress]);
+    if (conclusion.customerName) wsData.push(['Заказчик:', conclusion.customerName]);
+    if (conclusion.pipelineSection) wsData.push(['Участок трубопровода:', conclusion.pipelineSection]);
+    wsData.push([]);
+    
+    wsData.push(['Источник контроля:', conclusion.controlMethod]);
+    if (conclusion.equipment) wsData.push(['Оборудование:', conclusion.equipment]);
+    if (conclusion.sensitivity) wsData.push(['Чувствительность:', conclusion.sensitivity]);
+    if (conclusion.normativeDoc) wsData.push(['Нормативный документ:', conclusion.normativeDoc]);
+    wsData.push([]);
+    
+    if (conclusion.executor) wsData.push(['Исполнитель:', conclusion.executor]);
+    if (conclusion.certificate) wsData.push(['Удостоверение №:', conclusion.certificate]);
+    if (conclusion.certificateDate) wsData.push(['Дата аттестации:', new Date(conclusion.certificateDate).toLocaleDateString('ru-RU')]);
+    wsData.push([]);
+    wsData.push([]);
+    
+    wsData.push(['РЕЗУЛЬТАТЫ КОНТРОЛЯ']);
+    wsData.push([]);
+    
+    wsData.push([
+      '№',
+      'Номер стыка',
+      'Диаметр стыка',
+      'Толщина',
+      'Сварщик',
+      'Описание выявленных дефектов',
+      'Местоположение',
+      'Размер',
+      'Результат',
+      'Примечание'
+    ]);
+    
+    if (conclusion.defects && conclusion.defects.length > 0) {
+      conclusion.defects.forEach((defect, index) => {
+        wsData.push([
+          index + 1,
+          defect.weldNumber,
+          defect.diameter || '-',
+          defect.wallThickness || '-',
+          defect.welderName || '-',
+          defect.defectDescription || 'Дефектов не обнаружено',
+          defect.defectLocation || '-',
+          defect.defectSize || '-',
+          defect.result,
+          ''
+        ]);
+      });
+    }
+    
+    wsData.push([]);
+    wsData.push([]);
+    
+    if (conclusion.conclusionText) {
+      wsData.push(['ЗАКЛЮЧЕНИЕ:']);
+      wsData.push([conclusion.conclusionText]);
+      wsData.push([]);
+    }
+    
+    const resultText = conclusion.result === 'допущено' 
+      ? 'ДОПУЩЕНО К ЭКСПЛУАТАЦИИ'
+      : 'НЕ ДОПУЩЕНО К ЭКСПЛУАТАЦИИ';
+    wsData.push(['ИТОГОВОЕ РЕШЕНИЕ: ' + resultText]);
+    
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    
+    ws['!cols'] = [
+      { wch: 5 },
+      { wch: 15 },
+      { wch: 15 },
+      { wch: 12 },
+      { wch: 25 },
+      { wch: 40 },
+      { wch: 15 },
+      { wch: 12 },
+      { wch: 12 },
+      { wch: 20 }
+    ];
+    
+    XLSX.utils.book_append_sheet(wb, ws, 'Заключение');
+    
+    XLSX.writeFile(wb, `${conclusion.number}.xlsx`);
+    
+    toast({
+      title: 'Excel экспортирован',
       description: `Заключение ${conclusion.number} сохранено`
     });
   };
@@ -1239,6 +1345,14 @@ const Index = () => {
                               title="Экспорт в PDF"
                             >
                               <Icon name="FileDown" size={16} />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => exportToExcel(conclusion)}
+                              title="Экспорт в Excel"
+                            >
+                              <Icon name="FileSpreadsheet" size={16} />
                             </Button>
                             <Button
                               size="sm"
